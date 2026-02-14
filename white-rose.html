@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>White Rose 🤍</title>
+  <style>
+    html,body{margin:0;height:100%;background:#05060a;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    canvas{display:block}
+    .hint{
+      position:fixed;left:14px;bottom:12px;color:#cfd3ffb0;
+      font-size:12px;letter-spacing:.2px;user-select:none
+    }
+    .hint kbd{background:#11152a;border:1px solid #2b3260;padding:2px 6px;border-radius:6px;color:#e9ecff}
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">
+  <kbd>Space</kbd> เล่นใหม่ • <kbd>S</kbd> เปิด/ปิดเสียง • <kbd>F</kbd> โหมดลื่น/ประหยัด
+</div>
+
+<script>
+(() => {
+  // ==========================
+  // CONFIG (แก้ชื่อแฟนตรงนี้)
+  // ==========================
+  const LOVER_NAME = "สายไหม";
+  const TITLE = `For ${LOVER_NAME} 🤍`;
+  const SUB   = "A white rose, drawn slowly—just for you.";
+  const POPUP = `กุหลาบสีขาวนี้...มีให้ ${LOVER_NAME} คนเดียว`;
+
+  // ==========================
+  // Canvas setup (HiDPI)
+  // ==========================
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d", { alpha: false });
+
+  let W=0,H=0,DPR=1, cx=0, cy=0;
+  function resize(){
+    DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    W = Math.floor(innerWidth);
+    H = Math.floor(innerHeight);
+    canvas.width  = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W+"px";
+    canvas.style.height = H+"px";
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    cx = W/2; cy = H/2;
+  }
+  addEventListener("resize", resize, {passive:true});
+  resize();
+
+  // ==========================
+  // Helpers
+  // ==========================
+  const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  const easeInOut = t => (t<.5)?(4*t*t*t):(1-Math.pow(-2*t+2,3)/2);
+  const rnd=(a,b)=>a+Math.random()*(b-a);
+  const rndi=(a,b)=>Math.floor(rnd(a,b+1));
+  const tau=Math.PI*2;
+
+  // ==========================
+  // Optional Sound (WebAudio)
+  // ==========================
+  let audioOn = true;
+  let ac=null;
+  function beep(freq=660, dur=0.07, type="sine", gain=0.03){
+    if(!audioOn) return;
+    if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
+    const t0 = ac.currentTime;
+    const o = ac.createOscillator();
+    const g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t0);
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(gain, t0+0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    o.connect(g).connect(ac.destination);
+    o.start(t0);
+    o.stop(t0+dur+0.02);
+  }
+
+  // ==========================
+  // Background: gradient + stars
+  // ==========================
+  const stars = [];
+  function makeStars(n=220){
+    stars.length=0;
+    for(let i=0;i<n;i++){
+      stars.push({
+        x: Math.random()*W,
+        y: Math.random()*H,
+        r: Math.random()<0.85 ? rnd(0.6,1.6) : rnd(1.6,2.8),
+        tw: rnd(0.8, 2.2),
+        ph: rnd(0, tau),
+      });
+    }
+  }
+  makeStars();
+
+  function drawBackground(t){
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,"#0a0c18");
+    g.addColorStop(0.55,"#05060a");
+    g.addColorStop(1,"#020307");
+    ctx.fillStyle=g;
+    ctx.fillRect(0,0,W,H);
+
+    // glow behind rose (ลดลงให้ตัดชัด)
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    for(let i=0;i<16;i++){
+      const tt = i/15;
+      const rad = lerp(330, 40, tt);
+      const a = lerp(0.035, 0.0, tt);
+      ctx.fillStyle = `rgba(255,255,255,${a})`;
+      ctx.beginPath();
+      ctx.arc(cx, cy+20, rad, 0, tau);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // stars twinkle
+    ctx.save();
+    for(const s of stars){
+      const tw = (Math.sin(t*s.tw + s.ph)+1)*0.5;
+      const b = lerp(0.25, 1.0, tw);
+      ctx.fillStyle = `rgba(220,230,255,${0.35*b})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, tau);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // ==========================
+  // Particles (spark/heart/petal)
+  // ==========================
+  const particles = [];
+  function spawnSpark(x,y, n=18){
+    for(let i=0;i<n;i++){
+      const a=rnd(0,tau), sp=rnd(0.6,2.6);
+      particles.push({
+        kind:"spark",
+        x,y,
+        vx: Math.cos(a)*sp,
+        vy: Math.sin(a)*sp,
+        life:rndi(28,60),
+        r:rnd(1.2,2.8),
+        a:1
+      });
+    }
+  }
+  function spawnHearts(x,y, n=5){
+    for(let i=0;i<n;i++){
+      particles.push({
+        kind:"heart",
+        x:x+rnd(-20,20), y:y+rnd(-10,10),
+        vx:rnd(-0.35,0.35),
+        vy:rnd(-1.2,-2.2),
+        life:rndi(70,120),
+        s:rnd(10,18),
+        rot:rnd(0,tau),
+        rv:rnd(-0.03,0.03),
+        a:1
+      });
+    }
+  }
+  function spawnPetals(n=14){
+    for(let i=0;i<n;i++){
+      particles.push({
+        kind:"petal",
+        x:rnd(0,W),
+        y:rnd(-H*0.2,H*0.1),
+        vx:rnd(-0.25,0.25),
+        vy:rnd(0.55,1.1),
+        life:rndi(260,420),
+        s:rnd(10,18),
+        rot:rnd(0,tau),
+        rv:rnd(-0.04,0.04),
+        a:rnd(0.35,0.85)
+      });
+    }
+  }
+
+  function drawHeart(x,y,s,alpha){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.scale(s/18, s/18);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = "rgba(255,230,240,0.95)";
+    ctx.beginPath();
+    for(let i=0;i<=80;i++){
+      const tt = i/80 * tau;
+      const X = 16*Math.pow(Math.sin(tt),3);
+      const Y = -(13*Math.cos(tt) - 5*Math.cos(2*tt) - 2*Math.cos(3*tt) - Math.cos(4*tt));
+      if(i===0) ctx.moveTo(X,Y);
+      else ctx.lineTo(X,Y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawPetal(p){
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot);
+    ctx.globalAlpha = p.a;
+    ctx.fillStyle = "rgba(245,245,255,0.85)";
+    ctx.beginPath();
+    const rx = p.s*0.95, ry = p.s*0.55;
+    for(let i=0;i<24;i++){
+      const a = i/24*tau;
+      const x = Math.cos(a)*rx*(1+0.08*Math.sin(p.rot));
+      const y = Math.sin(a)*ry;
+      if(i===0) ctx.moveTo(x,y);
+      else ctx.lineTo(x,y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function updateParticles(){
+    for(let i=particles.length-1;i>=0;i--){
+      const p=particles[i];
+      p.life--;
+      if(p.kind==="spark"){
+        p.x+=p.vx; p.y+=p.vy;
+        p.vy += 0.02;
+        p.vx *= 0.985; p.vy *= 0.985;
+        p.a = p.life/60;
+      }else if(p.kind==="heart"){
+        p.x+=p.vx; p.y+=p.vy;
+        p.vy *= 0.995;
+        p.rot += p.rv;
+        p.a = clamp(p.life/120,0,1);
+      }else if(p.kind==="petal"){
+        p.x += p.vx + Math.sin(p.rot)*0.35;
+        p.y += p.vy;
+        p.rot += p.rv;
+        if(p.y>H+40){ p.y=rnd(-60,-10); p.x=rnd(0,W); }
+      }
+      if(p.life<=0 && p.kind!=="petal") particles.splice(i,1);
+    }
+  }
+
+  function renderParticles(){
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    for(const p of particles){
+      if(p.kind==="spark"){
+        ctx.globalAlpha = clamp(p.a,0,1);
+        ctx.fillStyle="rgba(255,255,255,0.85)";
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.r,0,tau);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+
+    for(const p of particles){
+      if(p.kind==="petal") drawPetal(p);
+      else if(p.kind==="heart") drawHeart(p.x,p.y,p.s,p.a*0.9);
+    }
+  }
+
+  // ==========================
+  // Stem + Leaves
+  // ==========================
+  function drawStem(){
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.lineCap="round";
+    ctx.lineJoin="round";
+    ctx.strokeStyle="rgba(120,255,170,0.95)";
+    ctx.lineWidth=8;
+    ctx.beginPath();
+    ctx.moveTo(0, 260);
+    ctx.bezierCurveTo(-18, 180, 24, 120, 0, 40);
+    ctx.stroke();
+
+    function leaf(x,y,flip){
+      ctx.save();
+      ctx.translate(x,y);
+      ctx.rotate(flip? -0.35:0.35);
+      ctx.fillStyle="rgba(80,220,140,0.9)";
+      ctx.strokeStyle="rgba(120,255,170,0.95)";
+      ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.quadraticCurveTo(40, -10, 70, 10);
+      ctx.quadraticCurveTo(35, 40, 0,0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+    leaf(-40,150,false);
+    leaf(30,190,true);
+    ctx.restore();
+  }
+
+  // ==========================
+  // Text (typing)
+  // ==========================
+  let typeProgress = 0;
+  function drawText(t){
+    const y1 = 60;
+    ctx.save();
+    ctx.textAlign="center";
+    ctx.fillStyle="rgba(245,245,255,0.95)";
+    ctx.font="700 34px system-ui,Segoe UI,Arial";
+    ctx.fillText(TITLE, cx, y1);
+
+    ctx.fillStyle="rgba(205,210,240,0.85)";
+    ctx.font="400 14px system-ui,Segoe UI,Arial";
+    typeProgress = Math.min(SUB.length, typeProgress + 0.6);
+    const sub = SUB.slice(0, Math.floor(typeProgress));
+    ctx.fillText(sub, cx, y1+28);
+    ctx.restore();
+  }
+
+  // ==========================
+  // Rose (กลีบซ้อน + ขอบ + เงา) => ดูเป็นกุหลาบชัด
+  // ==========================
+  function petalPath(w, h){
+    ctx.beginPath();
+    ctx.moveTo(0, -h*0.9);
+    ctx.bezierCurveTo(w*0.9, -h*0.9, w*1.1, -h*0.1, 0, h*0.9);
+    ctx.bezierCurveTo(-w*1.1, -h*0.1, -w*0.9, -h*0.9, 0, -h*0.9);
+    ctx.closePath();
+  }
+
+  function drawRose(){
+    const elapsed = timeline;
+
+    const drawDur = perfMode ? 4.8 : 7.2;
+    const p = clamp(elapsed / drawDur, 0, 1);
+    const pe = easeInOut(p);
+
+    const ox = cx, oy = cy + 10;
+
+    ctx.save();
+    ctx.translate(ox, oy);
+
+    // Outer petals
+    const outerCount = perfMode ? 14 : 20;
+    const outerShow = Math.floor(lerp(0, outerCount, pe));
+    for(let i=0;i<outerShow;i++){
+      const a = (i/outerCount)*tau;
+      const spread = lerp(120, 170, pe);
+      const w = lerp(48, 62, pe);
+      const h = lerp(95, 125, pe);
+
+      ctx.save();
+      ctx.rotate(a);
+      ctx.translate(0, -spread);
+
+      ctx.shadowColor = "rgba(0,0,0,0.25)";
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetY = 6;
+
+      const g = ctx.createLinearGradient(0, -h, 0, h);
+      g.addColorStop(0, "rgba(255,255,255,0.92)");
+      g.addColorStop(0.55, "rgba(230,232,245,0.86)");
+      g.addColorStop(1, "rgba(200,205,225,0.70)");
+
+      petalPath(w, h);
+      ctx.fillStyle = g;
+      ctx.fill();
+
+      ctx.shadowColor = "transparent";
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = "rgba(60,70,110,0.45)";
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.18;
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(90,100,140,0.40)";
+      for(let k=0;k<5;k++){
+        ctx.beginPath();
+        ctx.moveTo(0, -h*0.7);
+        ctx.quadraticCurveTo(rnd(-w*0.25,w*0.25), 0, 0, h*0.65);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+
+      if(!perfMode && Math.random()<0.03 && elapsed<drawDur){
+        const px = ox + Math.cos(a)*20;
+        const py = oy - spread + Math.sin(a)*20;
+        spawnSpark(px, py, rndi(6,12));
+      }
+    }
+
+    // Mid petals
+    const midCount = perfMode ? 10 : 14;
+    const midShow = Math.floor(lerp(0, midCount, pe));
+    for(let i=0;i<midShow;i++){
+      const a = (i/midCount)*tau + 0.18;
+      const spread = lerp(75, 110, pe);
+      const w = lerp(36, 46, pe);
+      const h = lerp(72, 95, pe);
+
+      ctx.save();
+      ctx.rotate(a);
+      ctx.translate(0, -spread);
+
+      ctx.shadowColor = "rgba(0,0,0,0.18)";
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetY = 5;
+
+      const g = ctx.createLinearGradient(0, -h, 0, h);
+      g.addColorStop(0, "rgba(255,255,255,0.95)");
+      g.addColorStop(0.6, "rgba(235,238,250,0.85)");
+      g.addColorStop(1, "rgba(205,210,230,0.65)");
+
+      petalPath(w, h);
+      ctx.fillStyle = g;
+      ctx.fill();
+
+      ctx.shadowColor = "transparent";
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = "rgba(60,70,110,0.40)";
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // Center bud (ทำให้รู้ว่าเป็นกุหลาบ)
+    const budP = clamp((pe - 0.25)/0.75, 0, 1);
+    const budLayers = perfMode ? 10 : 16;
+    for(let L=0; L<Math.floor(budLayers*budP); L++){
+      const lt = L/(budLayers-1);
+      const a = lt*1.2;
+      const r = lerp(28, 6, lt);
+      const w = lerp(22, 8, lt);
+      const h = lerp(46, 16, lt);
+
+      ctx.save();
+      ctx.rotate(a);
+      ctx.translate(r, -18 - r*0.2);
+
+      const g = ctx.createLinearGradient(0, -h, 0, h);
+      g.addColorStop(0, "rgba(255,255,255,0.98)");
+      g.addColorStop(0.7, "rgba(220,225,245,0.82)");
+      g.addColorStop(1, "rgba(170,175,205,0.55)");
+
+      petalPath(w, h);
+      ctx.fillStyle = g;
+      ctx.fill();
+
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = "rgba(70,80,125,0.38)";
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    ctx.restore();
+
+    if(p>0.45) drawStem();
+
+    if(p>0.86 && Math.random() < (perfMode?0.02:0.05)){
+      spawnHearts(cx, cy+40, perfMode?2:4);
+      if(!perfMode) beep(740,0.06,"sine",0.02);
+    }
+  }
+
+  // ==========================
+  // Timeline / loop
+  // ==========================
+  let timeline = 0;
+  let last = performance.now();
+  let perfMode = false;
+
+  function resetShow(){
+    timeline = 0;
+    typeProgress = 0;
+    particles.length = 0;
+    spawnPetals(perfMode?8:16);
+    makeStars(perfMode?140:230);
+    donePopup = false;
+  }
+
+  // ==========================
+  // End popup
+  // ==========================
+  let donePopup = false;
+  function maybePopup(){
+    if(donePopup) return;
+    const total = perfMode ? 6.0 : 8.2;
+    if(timeline > total){
+      donePopup = true;
+      beep(784,0.08,"sine",0.03);
+      setTimeout(()=>beep(988,0.08,"sine",0.03), 90);
+      setTimeout(()=>alert(POPUP), 220);
+    }
+  }
+
+  function frame(now){
+    const dt = Math.min(0.033, (now-last)/1000);
+    last = now;
+    timeline += dt;
+
+    drawBackground(now/1000);
+    drawRose();
+    drawText(now/1000);
+
+    updateParticles();
+    renderParticles();
+
+    // vignette
+    ctx.save();
+    const vg = ctx.createRadialGradient(cx,cy,Math.min(W,H)*0.2, cx,cy,Math.max(W,H)*0.8);
+    vg.addColorStop(0,"rgba(0,0,0,0)");
+    vg.addColorStop(1,"rgba(0,0,0,0.55)");
+    ctx.fillStyle = vg;
+    ctx.fillRect(0,0,W,H);
+    ctx.restore();
+
+    maybePopup();
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener("keydown", (e)=>{
+    if(e.code==="Space"){
+      resetShow();
+    }else if(e.key==="s" || e.key==="S"){
+      audioOn = !audioOn;
+      if(audioOn) beep(660,0.06,"sine",0.03);
+    }else if(e.key==="f" || e.key==="F"){
+      perfMode = !perfMode;
+      resetShow();
+    }
+  });
+
+  resetShow();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
